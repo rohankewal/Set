@@ -2,6 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Widgets deep-link back in: settracker://workout, settracker://start. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.rohankewalramani.Set</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>settracker</string>
+			</array>
+		</dict>
+	</array>
 	<!-- CloudKit delivers sync pushes here; without it SwiftData only syncs
 	     while the app is in the foreground. -->
 	<key>UIBackgroundModes</key>

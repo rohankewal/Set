@@ -6,7 +6,7 @@ import SwiftUI
 // Colours are resolved dynamically so light and dark are true inversions of
 // each other rather than two separately tuned themes.
 
-#if canImport(UIKit)
+#if os(iOS)
 import UIKit
 
 private func dynamic(light: Double, dark: Double) -> Color {
@@ -15,8 +15,9 @@ private func dynamic(light: Double, dark: Double) -> Color {
     })
 }
 #else
+// watchOS is always dark, and has no trait collection to ask.
 private func dynamic(light: Double, dark: Double) -> Color {
-    Color(white: light)
+    Color(white: dark)
 }
 #endif
 

@@ -56,12 +56,17 @@ SwiftUI + SwiftData for iOS 27.
   model rewrites the sentence; every number stays the app's own.
 - **Live Activity** — the rest countdown on the Lock Screen and in the Dynamic
   Island, with what's coming next.
+- **Widgets** — *This Week* (small, medium, large: sessions, week marks, 8-week
+  volume, the consistency grid), *Last Workout* (small, medium: the last session,
+  or a live timer while one is running, with Start/Resume), and *Streak* on the
+  Lock Screen. They read a snapshot the app writes to the App Group, never the
+  store, and show only a lock when Face ID is on.
 - **Apple Watch** — the current set and one button to log it, plus rest controls.
   The phone owns the data; the watch is a remote control.
 
 ## Design
 
-Black, white and five greys, defined once in `Design/Theme.swift` and resolved
+Black, white and five greys, defined once in `Shared/Theme.swift` and resolved
 dynamically so light and dark are true inversions. One accent: an inverted fill.
 Hairline dividers, wide-tracked micro-labels, monospaced numerals with tight
 optical tracking. No colour coding, no illustrations, no confetti.
@@ -72,7 +77,11 @@ optical tracking. No colour coding, no illustrations, no confetti.
 App/      SetApp.swift          — container, environment wiring, scene accessory
 Shared/   RestActivity.swift    — Live Activity contract (app + widget)
           WatchLink.swift       — phone/watch wire format (app + watch)
+          WidgetSnapshot.swift  — what widgets read, via the App Group
+          Theme.swift           — palette, type, motion (every target)
+          Units.swift           — kg-native storage, kg/lb presentation
 SetTimer/ RestLiveActivity      — Lock Screen and Dynamic Island
+          HomeWidgets           — home screen and Lock Screen widgets
 SetWatch/ WatchRootView         — the watch app
 Model/    StoreSchema.swift     — versioned schema + migration plan
           Deduplicator.swift    — merges what sync duplicated
@@ -81,7 +90,6 @@ Model/    StoreSchema.swift     — versioned schema + migration plan
                                    Routine, RoutineItem, BodyEntry
           PlateMath.swift       — barbell loading, plate rounding
           Stats.swift           — bests, weekly volume, streaks, milestone engine
-          Units.swift           — kg-native storage, kg/lb presentation
           Seed.swift            — starter movement library (idempotent)
           Export.swift          — JSON archive and CSV via Transferable
           Insights.swift        — density, rest adherence, stalls, the read
@@ -93,7 +101,8 @@ State/    WorkoutEngine.swift   — the live session: mutations, rest clock, awa
           CoachNarrator.swift   — Apple Intelligence rewrite, grounded + optional
           StoreHealth.swift     — save/sync reporting behind the warnings
           LiveActivityController / PhoneWatchLink
-Design/   Theme, Components     — palette, type, buttons, cards, rings
+          WidgetPublisher.swift — writes the widget snapshot on change
+Design/   Components            — buttons, cards, rings
 Views/    one file per surface
 ```
 
@@ -147,6 +156,13 @@ CloudKit imposes three rules that shaped the model layer:
   that; `allSessions`, `allBlocks`, `allSets` and friends keep call sites clean.
 - **Every relationship needs an inverse.** `Exercise` gained `blocks` and
   `routineItems`, both `.nullify`, so deleting a movement can't take history with it.
+
+**Before any release that changes the model**, bring CloudKit's Production schema
+up to date: run a Debug build once with `--init-cloudkit-schema` on a device or
+simulator signed into iCloud (it creates every record type and field in
+Development, where normal use would miss some), then *Deploy Schema Changes* in
+the CloudKit Console. Production schema changes are additive only — fields can't
+be removed or retyped afterwards.
 
 Sync state is reported plainly in Settings ("Syncing with iCloud", "Not signed in
 to iCloud"); when it isn't working, the log still writes locally and nothing is

@@ -116,7 +116,9 @@ struct RoutineCard: View {
     @Environment(WorkoutEngine.self) private var engine
 
     private var metadata: String {
-        var parts = ["^[\(routine.orderedItems.count) exercise](inflect: true)", "\(routine.totalSets) sets"]
+        // A plain String, so inflection markup wouldn't be interpreted here.
+        let count = routine.orderedItems.count
+        var parts = ["\(count) exercise\(count == 1 ? "" : "s")", "\(routine.totalSets) sets"]
         if routine.useCount > 0 { parts.append("used \(routine.useCount)×") }
         return parts.joined(separator: " · ")
     }

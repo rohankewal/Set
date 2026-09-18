@@ -24,11 +24,31 @@ struct SetApp: App {
         // Synced through the user's own private CloudKit database: no server of
         // ours, no account to create, and it's what makes a second device — or a
         // replacement phone — pick up the same log.
-        let configuration = ModelConfiguration(
+        //
+        // The store lives in the App Group container. SwiftData puts it there on
+        // its own once an App Group entitlement exists; saying so explicitly means
+        // adding or removing a group later can't silently move it and strand the
+        // log in the old location.
+        var configuration = ModelConfiguration(
             "SetStore",
             schema: schema,
+            groupContainer: .identifier(WidgetStore.appGroup),
             cloudKitDatabase: .automatic
         )
+        #if DEBUG
+        if CloudKitSchema.isRequested {
+            // This launch only pushes the schema. The real store stays off
+            // CloudKit meanwhile, so the placeholder records the schema pass
+            // uploads can never be imported into it.
+            configuration = ModelConfiguration(
+                "SetStore",
+                schema: schema,
+                groupContainer: .identifier(WidgetStore.appGroup),
+                cloudKitDatabase: .none
+            )
+            CloudKitSchema.initializeInBackground()
+        }
+        #endif
         let container: ModelContainer
         var fallbackReason: String?
         do {

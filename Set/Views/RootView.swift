@@ -12,6 +12,8 @@ struct RootView: View {
 
     @State private var tab: AppTab = .today
     @State private var showingWorkout = false
+    /// A widget link that arrived while the app was locked, applied on unlock.
+    @State private var pendingURL: URL?
     #if DEBUG
     @State private var showingSettingsForDebug = false
     @State private var showingRoutinesForDebug = false
@@ -109,6 +111,26 @@ struct RootView: View {
     }
     #endif
 
+    private func publishWidgets() {
+        WidgetPublisher.publish(athlete: athlete, engine: engine, settings: settings)
+    }
+
+    /// Links from the home screen widgets.
+    private func open(_ url: URL) {
+        guard url.scheme == WidgetRoute.scheme else { return }
+        switch url.host() {
+        case "workout":
+            tab = .today
+            showingWorkout = engine.isRunning
+        case "start":
+            tab = .today
+            if !engine.isRunning { engine.start(for: athlete) }
+            showingWorkout = true
+        default:
+            break
+        }
+    }
+
     private var athlete: Athlete? {
         athletes.first { $0.id == settings.selectedAthleteID } ?? athletes.first
     }
@@ -177,14 +199,31 @@ struct RootView: View {
             #endif
             if settings.selectedAthleteID == nil { settings.selectedAthleteID = athletes.first?.id }
             engine.restoreIfNeeded()
+            publishWidgets()
             if lock.isLocked { await lock.unlock() }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { lock.lockIfNeeded() }
+            if phase == .background {
+                lock.lockIfNeeded()
+                publishWidgets()
+            }
             if phase == .active {
                 Deduplicator.run(in: context)
+                publishWidgets()
                 Task { await StoreHealth.shared.refreshSyncStatus() }
             }
+        }
+        .onChange(of: engine.isRunning) { publishWidgets() }
+        .onChange(of: settings.selectedAthleteID) { publishWidgets() }
+        .onChange(of: settings.unit) { publishWidgets() }
+        .onChange(of: settings.requireBiometrics) { publishWidgets() }
+        .onOpenURL { url in
+            if lock.isLocked { pendingURL = url } else { open(url) }
+        }
+        .onChange(of: lock.isLocked) { _, locked in
+            guard !locked, let url = pendingURL else { return }
+            pendingURL = nil
+            open(url)
         }
         .animation(Motion.gentle, value: lock.isLocked)
     }
