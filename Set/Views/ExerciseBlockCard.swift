@@ -347,6 +347,9 @@ struct SetRow: View {
             }
         }
         .contentShape(.rect)
+        .modifier(SwipeToDelete {
+            withAnimation(Motion.snap) { engine.remove(set, from: block) }
+        })
         .contextMenu {
             Menu("Set type") {
                 ForEach(SetKind.allCases, id: \.self) { kind in
@@ -388,6 +391,96 @@ struct SetRow: View {
             .filter { $0.kind == .working }
             .firstIndex(where: { $0.id == set.id })
             .map { $0 + 1 } ?? set.index + 1
+    }
+}
+
+// MARK: - Swipe to delete
+
+/// Swipe left to reveal Delete, or all the way across to delete at once.
+/// Built by hand because set rows live in cards, not a `List`, where
+/// `swipeActions` would do this. Vertical drags are left to the scroll view.
+private struct SwipeToDelete: ViewModifier {
+    let onDelete: () -> Void
+
+    @State private var offset: CGFloat = 0
+    /// Where the row rests between drags: closed, or open on the button.
+    @State private var resting: CGFloat = 0
+    @State private var width: CGFloat = 0
+    @State private var isHorizontal: Bool?
+
+    private let reveal: CGFloat = 84
+
+    func body(content: Content) -> some View {
+        ZStack(alignment: .trailing) {
+            if offset < 0 {
+                Button(action: delete) {
+                    VStack(spacing: 3) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("Delete")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(Ink.onAccent)
+                    .frame(width: max(reveal, -offset))
+                    .frame(maxHeight: .infinity)
+                    .background(Ink.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHidden(true)
+            }
+
+            content
+                .background(Ink.surface)
+                .overlay {
+                    // While open, a tap anywhere on the row closes it rather
+                    // than landing in a field.
+                    if resting != 0 {
+                        Color.clear
+                            .contentShape(.rect)
+                            .onTapGesture { close() }
+                    }
+                }
+                .offset(x: offset)
+        }
+        .clipped()
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .simultaneousGesture(drag)
+        .accessibilityAction(named: "Delete set", delete)
+    }
+
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                if isHorizontal == nil {
+                    isHorizontal = abs(value.translation.width) > abs(value.translation.height)
+                }
+                guard isHorizontal == true else { return }
+                offset = min(0, resting + value.translation.width)
+            }
+            .onEnded { value in
+                defer { isHorizontal = nil }
+                guard isHorizontal == true else { return }
+                let dragged = -(resting + value.translation.width)
+                let projected = -(resting + value.predictedEndTranslation.width)
+                if dragged > width * 0.6 {
+                    delete()
+                } else if projected > reveal / 2 {
+                    withAnimation(Motion.snap) { offset = -reveal; resting = -reveal }
+                    Haptics.play(.tick)
+                } else {
+                    close()
+                }
+            }
+    }
+
+    private func close() {
+        withAnimation(Motion.snap) { offset = 0; resting = 0 }
+    }
+
+    private func delete() {
+        Haptics.play(.warning)
+        withAnimation(Motion.snap) { offset = -width }
+        onDelete()
     }
 }
 

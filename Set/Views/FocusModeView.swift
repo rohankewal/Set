@@ -16,7 +16,6 @@ struct FocusModeView: View {
     @Environment(WorkoutEngine.self) private var engine
     @Environment(\.dismiss) private var dismiss
 
-    @State private var index = 0
     @State private var editing: Field?
     @State private var flash = false
 
@@ -26,9 +25,10 @@ struct FocusModeView: View {
     }
 
     private var blocks: [ExerciseBlock] { session.orderedBlocks }
-    private var block: ExerciseBlock? {
-        blocks.indices.contains(index) ? blocks[index] : blocks.first
-    }
+    // Opens on, and moves, the engine's current exercise, so it matches the
+    // list you came from and the watch.
+    private var index: Int { engine.focusIndex }
+    private var block: ExerciseBlock? { engine.focusedBlock }
 
     /// The set being worked on: first unfinished, else the last one logged.
     private var currentSet: SetRecord? {
@@ -219,7 +219,7 @@ struct FocusModeView: View {
                 Capsule()
                     .fill(offset == index ? Ink.primary : Ink.line)
                     .frame(width: offset == index ? 18 : 6, height: 6)
-                    .onTapGesture { index = offset }
+                    .onTapGesture { engine.focus(on: item) }
             }
         }
         .padding(.top, 16)
@@ -231,12 +231,7 @@ struct FocusModeView: View {
         DragGesture(minimumDistance: 30)
             .onEnded { value in
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                if value.translation.width < 0 {
-                    index = min(index + 1, blocks.count - 1)
-                } else {
-                    index = max(index - 1, 0)
-                }
-                Haptics.play(.tick)
+                engine.moveFocus(by: value.translation.width < 0 ? 1 : -1)
             }
     }
 

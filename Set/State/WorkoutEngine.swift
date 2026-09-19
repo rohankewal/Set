@@ -38,16 +38,25 @@ final class WorkoutEngine {
     /// Set by the app once both exist; used to mirror state to the watch.
     @ObservationIgnored weak var watch: PhoneWatchLink?
 
-    /// Which exercise the wrist (and Focus mode) is pointed at.
-    private(set) var focusIndex = 0
+    /// The exercise you're on, shared by Focus mode and the watch. Held by
+    /// identity rather than position, so reordering exercises doesn't quietly
+    /// point it at a different one. It follows what you do: adding an
+    /// exercise or logging a set moves it there.
+    private(set) var focusedBlockID: UUID?
 
     /// The exercise currently in focus, defaulting to the first unfinished one.
     var focusedBlock: ExerciseBlock? {
         guard let session else { return nil }
         let blocks = session.orderedBlocks
         guard !blocks.isEmpty else { return nil }
-        if blocks.indices.contains(focusIndex) { return blocks[focusIndex] }
+        if let focusedBlockID, let block = blocks.first(where: { $0.id == focusedBlockID }) { return block }
         return blocks.first { !$0.isFinished } ?? blocks.first
+    }
+
+    /// Position of the focused exercise, for pagers.
+    var focusIndex: Int {
+        guard let session, let block = focusedBlock else { return 0 }
+        return session.orderedBlocks.firstIndex(of: block) ?? 0
     }
 
     /// The set to log next in the focused exercise.
@@ -58,10 +67,16 @@ final class WorkoutEngine {
 
     func moveFocus(by delta: Int) {
         guard let session else { return }
-        let count = session.orderedBlocks.count
-        guard count > 0 else { return }
-        focusIndex = min(max(focusIndex + delta, 0), count - 1)
+        let blocks = session.orderedBlocks
+        guard !blocks.isEmpty else { return }
+        focus(on: blocks[min(max(focusIndex + delta, 0), blocks.count - 1)])
         Haptics.play(.tick)
+    }
+
+    func focus(on block: ExerciseBlock) {
+        guard focusedBlockID != block.id else { return }
+        focusedBlockID = block.id
+        watch?.publish()
     }
 
     init(context: ModelContext, settings: AppSettings) {
@@ -116,7 +131,7 @@ final class WorkoutEngine {
         settings.activeSessionID = session.id
         sessionAwards = []
         pendingAwards = []
-        focusIndex = 0
+        focusedBlockID = nil
         save()
         applyScreenPolicy()
         Haptics.play(.complete)
@@ -147,6 +162,9 @@ final class WorkoutEngine {
                 }
             }
         }
+        // Built with addExercise, which moves focus to each new exercise;
+        // a repeated workout starts at the top.
+        focusedBlockID = nil
         save()
         return session
     }
@@ -213,6 +231,8 @@ final class WorkoutEngine {
         block.session = session
         context.insert(block)
         addSet(to: block)
+        // A newly added exercise is the one you're about to do.
+        focusedBlockID = block.id
         save()
         Haptics.play(.tick)
         return block
@@ -289,6 +309,7 @@ final class WorkoutEngine {
         set.isComplete = true
         set.completedAt = .now
         lastCompletedSetID = set.id
+        focusedBlockID = block.id
         Haptics.play(.complete)
 
         if let session, let athlete = session.athlete {
