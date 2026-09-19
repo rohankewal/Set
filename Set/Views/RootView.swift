@@ -18,6 +18,7 @@ struct RootView: View {
     @State private var showingSettingsForDebug = false
     @State private var showingRoutinesForDebug = false
     @State private var showingPlatesForDebug = false
+    @State private var showingSelfCheckForDebug = false
     @State private var showingFocusForDebug = false
     #endif
 
@@ -33,6 +34,7 @@ struct RootView: View {
         case "settings": showingSettingsForDebug = true
         case "routines": showingRoutinesForDebug = true
         case "plates": showingPlatesForDebug = true
+        case "selftest": showingSelfCheckForDebug = true
         case "dupes-make": DemoData.injectSyncDuplicates(context: context)
         case "dupes-fix": DemoData.verifyDeduplication(context: context)
         case "focus":
@@ -169,6 +171,7 @@ struct RootView: View {
         #if DEBUG
         .sheet(isPresented: $showingSettingsForDebug) { SettingsView() }
         .sheet(isPresented: $showingPlatesForDebug) { PlateCalculatorView(totalKg: 142.5) }
+        .fullScreenCover(isPresented: $showingSelfCheckForDebug) { SelfCheckView() }
         .fullScreenCover(isPresented: $showingFocusForDebug) {
             if let session = engine.session {
                 FocusModeView(session: session, athlete: athlete)

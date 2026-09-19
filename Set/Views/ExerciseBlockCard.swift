@@ -303,8 +303,10 @@ struct SetRow: View {
                     step: settings.unit.step
                 ) { new in
                     set.weightKg = settings.unit.toKilograms(new)
+                    // Logged sets stay editable: you did six of the eight you
+                    // wrote down. Any records the set earned are re-checked.
+                    engine.setDidChange(set, in: block)
                 }
-                .disabled(set.isComplete)
             }
 
             NumberField(
@@ -319,8 +321,8 @@ struct SetRow: View {
                 } else {
                     set.reps = Int(new.rounded())
                 }
+                engine.setDidChange(set, in: block)
             }
-            .disabled(set.isComplete)
 
             Spacer(minLength: 0)
 

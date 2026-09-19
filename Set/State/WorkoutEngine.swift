@@ -23,6 +23,9 @@ final class WorkoutEngine {
     var pendingAwards: [MilestoneAward] = []
     /// Set just marked done — used to drive the row's flash animation.
     private(set) var lastCompletedSetID: UUID?
+    /// When the last set was ticked, so a run of ticks reads as one catch-up
+    /// rather than a rest restarting under each tap.
+    @ObservationIgnored private var lastCompletionAt: Date?
     /// Non-nil right after finishing, so the summary sheet has something to show.
     var finishedSession: WorkoutSession?
     /// Everything earned during the current workout, banner-consumed or not, so
@@ -294,6 +297,9 @@ final class WorkoutEngine {
 
     func toggleCompletion(of set: SetRecord, in block: ExerciseBlock) {
         if set.isComplete {
+            // Un-ticking takes back whatever the set earned, so a record can't
+            // outlive the set behind it.
+            withdrawMilestones(for: set, in: block)
             set.isComplete = false
             set.completedAt = nil
             save()
@@ -326,11 +332,71 @@ final class WorkoutEngine {
 
         // Warm-ups don't earn a rest, and inside a superset only the last
         // exercise does — that's the whole point of pairing them.
+        //
+        // Two cases where a tick isn't the end of a set you just did:
+        // ticking one that sits before a set already logged is catching up on
+        // something done earlier, and a run of quick ticks is one catch-up, so
+        // the rest already counting down keeps its start rather than jumping
+        // back to full under each tap.
+        let isBackfill = block.orderedSets.contains { $0.index > set.index && $0.isComplete }
+        let continuingCatchUp = isRestActive
+            && (lastCompletionAt.map { Date.now.timeIntervalSince($0) < 15 } ?? false)
+
         if settings.autoStartRest,
            set.kind != .warmup,
-           block.isLastInSuperset(of: session) {
+           block.isLastInSuperset(of: session),
+           !isBackfill,
+           !continuingCatchUp {
             startRest(seconds: block.restSeconds, exercise: block.name)
         }
+        lastCompletionAt = .now
+    }
+
+    /// Called when a logged set's numbers are corrected — the reps you actually
+    /// managed, a weight typed wrong. The set stays logged and the rest keeps
+    /// running; only the records it earned are worked out again.
+    func setDidChange(_ set: SetRecord, in block: ExerciseBlock) {
+        guard set.isComplete else { save(); return }
+        withdrawMilestones(for: set, in: block)
+
+        // Edited down to nothing: that isn't a logged set any more.
+        guard isLoggable(set, tracking: block.tracking) else {
+            set.isComplete = false
+            set.completedAt = nil
+            save()
+            return
+        }
+
+        if let session, let athlete = session.athlete {
+            let engine = MilestoneEngine(context: context, athlete: athlete)
+            let awards = engine.evaluate(set: set, block: block, session: session)
+            if !awards.isEmpty {
+                pendingAwards.append(contentsOf: awards)
+                sessionAwards.append(contentsOf: awards)
+                Haptics.play(.record)
+            }
+        }
+        save()
+    }
+
+    /// Removes the milestones a set wrote, matched by its completion time.
+    private func withdrawMilestones(for set: SetRecord, in block: ExerciseBlock) {
+        guard let athlete = session?.athlete, let stamp = set.completedAt else { return }
+        let name = block.name
+        let stale = athlete.allMilestones.filter { $0.exerciseName == name && $0.achievedAt == stamp }
+        guard !stale.isEmpty else { return }
+
+        func key(kind: MilestoneKind, name: String, value: Double) -> String {
+            "\(kind.rawValue)|\(name)|\(value)"
+        }
+        let staleKeys = Set(stale.map { key(kind: $0.kind, name: $0.exerciseName, value: $0.value) })
+        pendingAwards.removeAll { staleKeys.contains(key(kind: $0.kind, name: $0.exerciseName, value: $0.value)) }
+        sessionAwards.removeAll { staleKeys.contains(key(kind: $0.kind, name: $0.exerciseName, value: $0.value)) }
+        for milestone in stale { context.delete(milestone) }
+        // Saved before anything re-reads the records: a pending delete is still
+        // visible on the athlete, and a withdrawn record left standing would
+        // make the corrected set look like it hadn't beaten anything.
+        context.saveChanges()
     }
 
     // MARK: Supersets

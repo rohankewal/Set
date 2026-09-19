@@ -18,6 +18,8 @@ struct FocusModeView: View {
 
     @State private var editing: Field?
     @State private var flash = false
+    /// The set just logged here, so a short set can be corrected on the spot.
+    @State private var loggedSetID: UUID?
 
     fileprivate enum Field: Identifiable {
         case weight, reps
@@ -46,6 +48,7 @@ struct FocusModeView: View {
                     Spacer(minLength: 0)
                     numbers(block: block, set: set)
                     Spacer(minLength: 0)
+                    correction(block: block)
                     logButton(block: block, set: set)
                     pager
                 }
@@ -182,9 +185,39 @@ struct FocusModeView: View {
 
     // MARK: Log
 
+    /// After logging, the reps you actually managed are one tap away — no
+    /// keypad, no un-ticking. Sits in reserved space so the button never moves.
+    @ViewBuilder
+    private func correction(block: ExerciseBlock) -> some View {
+        let logged = block.orderedSets.first { $0.id == loggedSetID && $0.isComplete }
+        HStack(spacing: 14) {
+            if let logged, block.tracking != .duration {
+                Text("Logged \(logged.reps) reps")
+                    .font(.system(size: 14).monospacedDigit())
+                    .foregroundStyle(Ink.secondary)
+                ForEach([-1, 1], id: \.self) { delta in
+                    Button {
+                        guard logged.reps + delta > 0 else { return }
+                        logged.reps += delta
+                        engine.setDidChange(logged, in: block)
+                        Haptics.play(.tick)
+                    } label: {
+                        Image(systemName: delta < 0 ? "minus" : "plus")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .buttonStyle(IconButtonStyle(size: 34))
+                    .disabled(logged.reps + delta < 1)
+                }
+            }
+        }
+        .frame(height: 40)
+        .animation(Motion.snap, value: loggedSetID)
+    }
+
     private func logButton(block: ExerciseBlock, set: SetRecord) -> some View {
         Button {
             engine.toggleCompletion(of: set, in: block)
+            loggedSetID = set.isComplete ? set.id : nil
             withAnimation(Motion.snap) { flash = true }
             // Queue the next set so there's always something to log.
             if block.orderedSets.allSatisfy(\.isComplete) {

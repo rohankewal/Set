@@ -169,6 +169,7 @@ struct MilestoneEngine {
         guard !name.isEmpty else { return [] }
 
         let history = Stats.bests(for: name, in: athlete.allSessions, excluding: session.id)
+        let stamp = set.completedAt ?? .now
         var awards: [MilestoneAward] = []
 
         func consider(_ kind: MilestoneKind, value: Double, historyBaseline: Double) {
@@ -176,10 +177,10 @@ struct MilestoneEngine {
             let baseline = max(historyBaseline, currentRecord(kind: kind, exerciseName: name))
             // First-ever entries are recorded silently; only genuine improvements surface.
             guard baseline > 0, value > baseline + 0.001 else {
-                if baseline == 0 { write(kind, name: name, value: value, previous: 0) }
+                if baseline == 0 { write(kind, name: name, value: value, previous: 0, at: stamp) }
                 return
             }
-            write(kind, name: name, value: value, previous: baseline)
+            write(kind, name: name, value: value, previous: baseline, at: stamp)
             awards.append(
                 MilestoneAward(kind: kind, exerciseName: name, value: value, previousValue: baseline)
             )
@@ -243,13 +244,17 @@ struct MilestoneEngine {
         return awards
     }
 
-    private func write(_ kind: MilestoneKind, name: String, value: Double, previous: Double) {
+    /// `achievedAt` is stamped with the set's own completion time rather than
+    /// "now", which is what lets a correction find and withdraw the records a
+    /// set earned.
+    private func write(_ kind: MilestoneKind, name: String, value: Double, previous: Double, at date: Date = .now) {
         let milestone = Milestone(
             kind: kind,
             exerciseName: name,
             value: value,
             previousValue: previous,
-            athlete: athlete
+            athlete: athlete,
+            achievedAt: date
         )
         context.insert(milestone)
     }
