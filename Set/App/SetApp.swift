@@ -42,7 +42,7 @@ struct SetApp: App {
             // uploads can never be imported into it.
             configuration = ModelConfiguration(
                 "SetStore",
-                schema: schema,
+                schema: schema,	
                 groupContainer: .identifier(WidgetStore.appGroup),
                 cloudKitDatabase: .none
             )

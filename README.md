@@ -12,7 +12,12 @@ SwiftUI + SwiftData for iOS 27.
   a slim bar with a play button when idle, and a large ring that drains, breathes
   while it runs, and pauses/resumes on a single big tap once a rest starts. ±15s
   and skip sit under it, plus an optional local notification so the phone can go
-  in a pocket. Completing a working set starts it automatically.
+  in a pocket. Completing a working set starts it automatically — except for
+  warm-ups, for the first exercises of a superset, and when you're catching up
+  on a set you forgot to tick, where a rest either isn't due or is already
+  running. The clock belongs to the session rather than to whatever screen is
+  open: it keeps time across tabs, Focus mode, the Lock Screen, backgrounding
+  and a relaunch, and finishes exactly once wherever you are.
 - **Milestones** — heaviest set, best estimated 1RM (Epley), rep records, session
   volume records, workout-count badges, week streaks and lifetime tonnage are
   detected as they happen and shown as a banner mid-set, then recapped on the

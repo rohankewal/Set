@@ -48,6 +48,9 @@ final class AppSettings {
         static let requireBiometrics = "settings.requireBiometrics"
         static let selectedAthlete = "settings.selectedAthleteID"
         static let activeSession = "settings.activeSessionID"
+        static let restEndsAt = "settings.restEndsAt"
+        static let restPaused = "settings.restPausedRemaining"
+        static let restTotal = "settings.restTotalSeconds"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -74,6 +77,49 @@ final class AppSettings {
         _requireBiometrics = defaults.bool(forKey: Key.requireBiometrics)
         _selectedAthleteID = defaults.string(forKey: Key.selectedAthlete).flatMap(UUID.init(uuidString:))
         _activeSessionID = defaults.string(forKey: Key.activeSession).flatMap(UUID.init(uuidString:))
+        let storedEnd = defaults.double(forKey: Key.restEndsAt)
+        _restEndsAt = storedEnd > 0 ? Date(timeIntervalSince1970: storedEnd) : nil
+        let storedPaused = defaults.double(forKey: Key.restPaused)
+        _restPausedRemaining = storedPaused > 0 ? storedPaused : nil
+        _restTotalSeconds = defaults.integer(forKey: Key.restTotal)
+    }
+
+    // MARK: Rest, parked on disk
+    //
+    // A rest outlives the screen it started on, and the app itself: quitting
+    // mid-rest and coming back should find the clock where you left it.
+
+    @ObservationIgnored private var _restEndsAt: Date?
+    var restEndsAt: Date? {
+        get { access(keyPath: \.restEndsAt); return _restEndsAt }
+        set {
+            withMutation(keyPath: \.restEndsAt) {
+                _restEndsAt = newValue
+                defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: Key.restEndsAt)
+            }
+        }
+    }
+
+    @ObservationIgnored private var _restPausedRemaining: TimeInterval?
+    var restPausedRemaining: TimeInterval? {
+        get { access(keyPath: \.restPausedRemaining); return _restPausedRemaining }
+        set {
+            withMutation(keyPath: \.restPausedRemaining) {
+                _restPausedRemaining = newValue
+                defaults.set(newValue ?? 0, forKey: Key.restPaused)
+            }
+        }
+    }
+
+    @ObservationIgnored private var _restTotalSeconds: Int
+    var restTotalSeconds: Int {
+        get { access(keyPath: \.restTotalSeconds); return _restTotalSeconds }
+        set {
+            withMutation(keyPath: \.restTotalSeconds) {
+                _restTotalSeconds = newValue
+                defaults.set(newValue, forKey: Key.restTotal)
+            }
+        }
     }
 
     @ObservationIgnored private var _unit: WeightUnit

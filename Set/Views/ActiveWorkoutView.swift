@@ -132,7 +132,6 @@ struct ActiveWorkoutView: View {
             }
         }
         .task(id: engine.pendingAwards.count) { await drainAwards() }
-        .task(id: engine.restEndsAt) { await watchRest() }
         .animation(Motion.snap, value: award?.id)
     }
 
@@ -243,14 +242,6 @@ struct ActiveWorkoutView: View {
         }
     }
 
-    private func watchRest() async {
-        guard let end = engine.restEndsAt else { return }
-        let seconds = end.timeIntervalSinceNow
-        guard seconds > 0 else { engine.restDidFinish(); return }
-        try? await Task.sleep(for: .seconds(seconds))
-        guard !Task.isCancelled else { return }
-        engine.restDidFinish()
-    }
 }
 
 // MARK: - Award banner

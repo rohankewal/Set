@@ -13,19 +13,39 @@ final class WorkoutEngine {
     // MARK: State
 
     private(set) var session: WorkoutSession?
+
+    // The rest clock lives in settings rather than in memory, so it survives
+    // the app being quit mid-rest, and it's owned here rather than by whatever
+    // screen happens to be on: the countdown runs, and finishes, the same way
+    // from the workout list, Focus mode, another tab, or the background.
     /// Wall-clock end of the current rest period. `nil` means "not counting" —
     /// either idle, or paused with the remainder parked in `restPausedRemaining`.
-    private(set) var restEndsAt: Date?
+    var restEndsAt: Date? {
+        get { settings.restEndsAt }
+        set { settings.restEndsAt = newValue }
+    }
     /// Seconds left on a paused rest. Non-nil only while paused.
-    private(set) var restPausedRemaining: TimeInterval?
-    private(set) var restTotal: Int = 90
+    var restPausedRemaining: TimeInterval? {
+        get { settings.restPausedRemaining }
+        set { settings.restPausedRemaining = newValue }
+    }
+    var restTotal: Int {
+        // Falls back to the preference when nothing has been parked yet, so the
+        // ring never divides by a stale zero.
+        get { settings.restTotalSeconds > 0 ? settings.restTotalSeconds : settings.defaultRestSeconds }
+        set { settings.restTotalSeconds = max(1, newValue) }
+    }
+    @ObservationIgnored private var countdown: Task<Void, Never>?
+    /// How close two ticks have to be to count as one catch-up.
+    @ObservationIgnored static var catchUpWindow: TimeInterval = 15
     /// Newly earned records waiting to be shown as a banner.
     var pendingAwards: [MilestoneAward] = []
     /// Set just marked done — used to drive the row's flash animation.
     private(set) var lastCompletedSetID: UUID?
-    /// When the last set was ticked, so a run of ticks reads as one catch-up
-    /// rather than a rest restarting under each tap.
+    /// When and where the last set was ticked, so a run of ticks reads as one
+    /// catch-up rather than a rest restarting under each tap.
     @ObservationIgnored private var lastCompletionAt: Date?
+    @ObservationIgnored private var lastCompletionBlockID: UUID?
     /// Non-nil right after finishing, so the summary sheet has something to show.
     var finishedSession: WorkoutSession?
     /// Everything earned during the current workout, banner-consumed or not, so
@@ -123,6 +143,8 @@ final class WorkoutEngine {
             return
         }
         session = found
+        // A rest that was running when the app closed is still running now.
+        if restPausedRemaining == nil { reconcileRest() }
         applyScreenPolicy()
     }
 
@@ -135,6 +157,7 @@ final class WorkoutEngine {
         sessionAwards = []
         pendingAwards = []
         focusedBlockID = nil
+        endRest()
         save()
         applyScreenPolicy()
         Haptics.play(.complete)
@@ -339,8 +362,12 @@ final class WorkoutEngine {
         // the rest already counting down keeps its start rather than jumping
         // back to full under each tap.
         let isBackfill = block.orderedSets.contains { $0.index > set.index && $0.isComplete }
-        let continuingCatchUp = isRestActive
-            && (lastCompletionAt.map { Date.now.timeIntervalSince($0) < 15 } ?? false)
+        // Only within the same exercise, and only against a rest that's
+        // actually running: moving to another exercise, or logging while the
+        // rest is paused, deserves a fresh clock.
+        let continuingCatchUp = isResting
+            && lastCompletionBlockID == block.id
+            && (lastCompletionAt.map { Date.now.timeIntervalSince($0) < Self.catchUpWindow } ?? false)
 
         if settings.autoStartRest,
            set.kind != .warmup,
@@ -350,6 +377,7 @@ final class WorkoutEngine {
             startRest(seconds: block.restSeconds, exercise: block.name)
         }
         lastCompletionAt = .now
+        lastCompletionBlockID = block.id
     }
 
     /// Called when a logged set's numbers are corrected — the reps you actually
@@ -554,6 +582,7 @@ final class WorkoutEngine {
         restPausedRemaining = nil
         let end = Date.now.addingTimeInterval(Double(seconds))
         restEndsAt = end
+        scheduleCountdown(to: end)
         if settings.restAlertsEnabled {
             let target = Double(seconds)
             Task { await RestAlerts.schedule(in: target, exercise: exercise) }
@@ -605,6 +634,7 @@ final class WorkoutEngine {
         guard let end = restEndsAt else { return }
         restPausedRemaining = max(0, end.timeIntervalSinceNow)
         restEndsAt = nil
+        countdown?.cancel()
         RestAlerts.cancel()
         refreshLiveActivity()
         Haptics.play(.tick)
@@ -616,7 +646,9 @@ final class WorkoutEngine {
             return
         }
         restPausedRemaining = nil
-        restEndsAt = Date.now.addingTimeInterval(remaining)
+        let end = Date.now.addingTimeInterval(remaining)
+        restEndsAt = end
+        scheduleCountdown(to: end)
         if settings.restAlertsEnabled {
             Task { await RestAlerts.schedule(in: remaining, exercise: "") }
         }
@@ -651,6 +683,7 @@ final class WorkoutEngine {
         guard newEnd > .now else { endRest(); return }
         restTotal = max(restTotal + delta, 15)
         restEndsAt = newEnd
+        scheduleCountdown(to: newEnd)
         if settings.restAlertsEnabled {
             let remaining = newEnd.timeIntervalSinceNow
             Task { await RestAlerts.schedule(in: remaining, exercise: "") }
@@ -660,6 +693,8 @@ final class WorkoutEngine {
     }
 
     func endRest() {
+        countdown?.cancel()
+        countdown = nil
         restEndsAt = nil
         restPausedRemaining = nil
         RestAlerts.cancel()
@@ -667,12 +702,41 @@ final class WorkoutEngine {
         watch?.publish()
     }
 
-    /// Called by the countdown view when it reaches zero.
+    /// The rest reached zero. Fired by the engine's own countdown, so it
+    /// happens wherever you are — or on return to the app if it was asleep.
     func restDidFinish() {
         guard restEndsAt != nil else { return }
+        countdown?.cancel()
+        countdown = nil
         restEndsAt = nil
+        restPausedRemaining = nil
         liveActivity.end()
+        watch?.publish()
         Haptics.play(.record)
+    }
+
+    private func scheduleCountdown(to end: Date) {
+        countdown?.cancel()
+        countdown = Task { [weak self] in
+            let seconds = end.timeIntervalSinceNow
+            if seconds > 0 {
+                try? await Task.sleep(for: .seconds(seconds))
+            }
+            guard !Task.isCancelled else { return }
+            guard let self, self.restEndsAt == end else { return }
+            self.restDidFinish()
+        }
+    }
+
+    /// Re-syncs the clock with the wall clock: on launch, and whenever the app
+    /// comes back to the foreground after iOS froze the countdown.
+    func reconcileRest() {
+        guard let end = restEndsAt else { return }
+        if end <= .now {
+            restDidFinish()
+        } else {
+            scheduleCountdown(to: end)
+        }
     }
 
     // MARK: Plumbing

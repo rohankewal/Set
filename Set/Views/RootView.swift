@@ -212,6 +212,7 @@ struct RootView: View {
             }
             if phase == .active {
                 Deduplicator.run(in: context)
+                engine.reconcileRest()
                 publishWidgets()
                 Task { await StoreHealth.shared.refreshSyncStatus() }
             }
